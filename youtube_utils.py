@@ -1,70 +1,103 @@
 import yt_dlp
 import os
 
-def download_audio(query, download_path="/home/ubuntu/youtube_audio_downloader/downloads"):
-    """Searches YouTube for the query and downloads the audio of the first result.
+# Path to your ffmpeg installation (adjust as needed)
+FFMPEG_PATH = "C:/ffmpeg-master-latest-win64-gpl-shared/bin"
+
+def add_ffmpeg_to_path():
+    """Adds ffmpeg binary directory to system PATH."""
+    if FFMPEG_PATH not in os.environ["PATH"]:
+        os.environ["PATH"] += os.pathsep + FFMPEG_PATH
+
+def download_media(query, download_path="downloads", media_option="Audio (MP3)"):
+    """
+    Searches YouTube for the query and downloads audio or video based on media_option.
 
     Args:
-        query (str): The search query for YouTube.
-        download_path (str): The directory to save the downloaded audio file.
+        query (str): The search query or YouTube URL.
+        download_path (str): Directory to save the downloaded file.
+        media_option (str): One of "Audio (MP3)", "Video Low (MP4)", "Video Standard (MP4)", "Video High (MP4)".
 
     Returns:
-        str: The path to the downloaded audio file, or None if download failed.
+        str: Path to the downloaded file (MP3 or MP4), or None if download failed.
     """
     if not os.path.exists(download_path):
         os.makedirs(download_path)
 
+    # Base ydl_opts; we will modify depending on audio/video
     ydl_opts = {
-        'format': 'bestaudio/best',
-        'ffmpeg_location': 'C:/ffmpeg/bin',
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }],
+        'ffmpeg_location': FFMPEG_PATH,
         'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),
-        'default_search': 'ytsearch1', # Search YouTube and get the first result
+        'default_search': 'ytsearch1',
         'noplaylist': True,
-        'quiet': True, # Suppress console output from yt-dlp
+        'quiet': True,
         'no_warnings': True,
     }
+
+    # Determine format & postprocessors based on media_option
+    if media_option == "Audio (MP3)":
+        ydl_opts.update({
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+        })
+        expected_ext = '.mp3'
+
+    else:
+        # It's video—choose quality
+        # yt_dlp allows selecting formats like 'bestvideo[height<=360]+bestaudio' etc.
+        if media_option == "Video Low (MP4)":
+            # e.g., 360p
+            ydl_opts['format'] = 'bestvideo[height<=360]+bestaudio/best'
+        elif media_option == "Video Standard (MP4)":
+            # e.g., 720p
+            ydl_opts['format'] = 'bestvideo[height<=720]+bestaudio/best'
+        elif media_option == "Video High (MP4)":
+            # e.g., 1080p or best available
+            ydl_opts['format'] = 'bestvideo+bestaudio/best'
+        else:
+            # Fallback to bestvideo+bestaudio
+            ydl_opts['format'] = 'bestvideo+bestaudio/best'
+
+        # We want an mp4 container (even if streams come as mkv), so post-process with ffmpeg
+        ydl_opts['postprocessors'] = [{
+            'key': 'FFmpegVideoConvertor',
+            'preferedformat': 'mp4',
+        }]
+        expected_ext = '.mp4'
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info_dict = ydl.extract_info(query, download=True)
-            # ydl.download([query]) # This might re-download if extract_info didn't trigger it fully
 
-            # Construct the expected filename after download and conversion
-            # Note: This relies on yt-dlp's naming convention and might need adjustment
-            # if the title contains characters invalid for filenames.
-            # A more robust way might involve hooks, but this is simpler for now.
+            # Extract the video info (either single-video or search result)
             if info_dict and 'entries' in info_dict and info_dict['entries']:
-                # Handle search results (which are like playlists)
                 video_info = info_dict['entries'][0]
             elif info_dict:
-                 # Handle direct URL or single video result
-                 video_info = info_dict
+                video_info = info_dict
             else:
                 print("Error: Could not extract video info.")
                 return None
 
-            # Get the base filename yt-dlp would use (before extension change)
+            # Prepare the filename (before extension)
             base_filename = ydl.prepare_filename(video_info)
-            # Change the extension to mp3
-            downloaded_file_path = os.path.splitext(base_filename)[0] + '.mp3'
+            downloaded_file_path = os.path.splitext(base_filename)[0] + expected_ext
 
-            # Check if the file exists (download and conversion successful)
+            # If file exists exactly as expected:
             if os.path.exists(downloaded_file_path):
-                print(f"Successfully downloaded and converted: {downloaded_file_path}")
+                print(f"Successfully downloaded: {downloaded_file_path}")
                 return downloaded_file_path
-            else:
-                # Sometimes the filename might differ slightly, try finding the mp3 file
-                for file in os.listdir(download_path):
-                    if file.endswith(".mp3") and video_info.get('title', '___') in file:
-                         print(f"Found matching mp3: {os.path.join(download_path, file)}")
-                         return os.path.join(download_path, file)
-                print(f"Error: Expected file not found after download: {downloaded_file_path}")
-                return None
+
+            # Otherwise, try to find a matching file in the download directory
+            for file in os.listdir(download_path):
+                if file.endswith(expected_ext) and video_info.get('title', '') in file:
+                    return os.path.join(download_path, file)
+
+            print(f"Error: Expected file not found after download: {downloaded_file_path}")
+            return None
 
     except yt_dlp.utils.DownloadError as e:
         print(f"Error during download: {e}")

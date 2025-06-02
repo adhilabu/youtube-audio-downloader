@@ -1,44 +1,75 @@
 import streamlit as st
 import os
-from youtube_utils import download_audio
+import shutil
 
-st.title("YouTube Audio Downloader")
+# Import from your updated youtube_utils
+from youtube_utils import download_media, FFMPEG_PATH, add_ffmpeg_to_path
 
-# Create a directory for downloads if it doesn't exist
-download_dir = "C:/Users/user0/Downloads/telegram/youtube_audio_downloader/downloads"
-if not os.path.exists(download_dir):
-    os.makedirs(download_dir)
+st.title("YouTube Media Downloader")
 
+# Verify ffmpeg availability and add to PATH
+def is_ffmpeg_available() -> bool:
+    if shutil.which("ffmpeg"):
+        return True
+    ffmpeg_exe = os.path.join(FFMPEG_PATH, "ffmpeg.exe")
+    if os.path.isfile(ffmpeg_exe):
+        add_ffmpeg_to_path()
+        return True
+    return False
+
+# Check FFmpeg availability
+if not is_ffmpeg_available():
+    st.error(
+        "ffmpeg not found. Please install ffmpeg and ensure it's available in your PATH, "
+        f"or adjust FFMPEG_PATH in youtube_utils.py to point to your ffmpeg binary directory. "
+        f"Current path: {FFMPEG_PATH}"
+    )
+    st.stop()
+
+# Sidebar: configure download directory
+download_dir = st.sidebar.text_input(
+    "Download directory:",
+    value=os.path.join(os.getcwd(), "downloads")
+)
+os.makedirs(download_dir, exist_ok=True)
+
+# Normal widgets (no st.form)
+media_option = st.radio(
+    "Select media type:",
+    ("Audio (MP3)", "Video Low (MP4)", "Video Standard (MP4)", "Video High (MP4)")
+)
 search_query = st.text_input("Enter song name or YouTube URL:")
 
-if st.button("Download Audio (MP3)"):
-    if search_query:
-        st.info(f"Searching and downloading audio for: {search_query}")
+# Now this button’s label will always show the current media_option
+if st.button(f"Download {media_option}"):
+    if not search_query:
+        st.warning("Please enter a search query or URL.")
+    else:
+        st.info(f"Searching and downloading {media_option.lower()} for: {search_query}")
         with st.spinner("Downloading..."):
             try:
-                # Ensure the download path is absolute for clarity
-                absolute_download_dir = os.path.abspath(download_dir)
-                file_path = download_audio(search_query, download_path=absolute_download_dir)
-
+                file_path = download_media(search_query, download_dir, media_option)
                 if file_path and os.path.exists(file_path):
                     st.success("Download complete!")
                     file_name = os.path.basename(file_path)
-                    # Read the file content for the download button
+                    mime_type = "audio/mpeg" if media_option.startswith("Audio") else "video/mp4"
                     with open(file_path, "rb") as fp:
-                        btn = st.download_button(
+                        st.download_button(
                             label=f"Download {file_name}",
                             data=fp,
                             file_name=file_name,
-                            mime="audio/mpeg"
+                            mime=mime_type
                         )
                 else:
-                    st.error("Download failed. Could not find the downloaded file or an error occurred during download. Please check the logs or try a different query.")
+                    st.error(
+                        "Download failed. Could not find the downloaded file "
+                        "or an error occurred during processing."
+                    )
             except Exception as e:
                 st.error(f"An unexpected error occurred: {e}")
-    else:
-        st.warning("Please enter a search query or URL.")
 
-# Optional: Add some instructions or information
-st.markdown("--- ")
-st.markdown("**How to use:** Enter the name of a song or a direct YouTube video URL in the box above and click the button. The audio will be downloaded as an MP3 file.")
-
+st.markdown("---")
+st.markdown(
+    "Enter the name of a song or a direct YouTube video URL, choose media type "
+    "(including low/high quality), and click Download to get your file."
+)

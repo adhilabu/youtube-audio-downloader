@@ -1,0 +1,2 @@
+(venv) PS F:\youtube-audio-downloader> .\venv\Scripts\activate       
+(venv) PS F:\youtube-audio-downloader> streamlit run .\app.py
